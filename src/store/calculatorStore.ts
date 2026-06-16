@@ -12,9 +12,8 @@ type HistorySnapshot = {
 };
 
 class CalculatorStore {
-  private historyTimer?: number;
-  private readyForHistory = false;
   private listeners: Set<Listener> = new Set();
+  private lastCommittedFingerprint: string | null = null;
 
   public weightInput: string = storageService.get<string>('ismar_weight') || '';
   public priceInput: string = storageService.get<string>('ismar_price') || '';
@@ -27,8 +26,6 @@ class CalculatorStore {
     if (this.weightInput || this.priceInput) {
       this.recalculate();
     }
-
-    this.readyForHistory = true;
   }
 
   subscribe(listener: Listener) {
@@ -40,14 +37,11 @@ class CalculatorStore {
     this.listeners.forEach((listener) => listener());
   }
 
-  private clearHistoryTimer() {
-    if (this.historyTimer !== undefined) {
-      clearTimeout(this.historyTimer);
-      this.historyTimer = undefined;
-    }
+  private makeItemId() {
+    return `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   }
 
-  private getResultFingerprint() {
+  private fingerprintFromResult() {
     if (!this.result) {
       return '';
     }
@@ -59,7 +53,7 @@ class CalculatorStore {
     ].join('|');
   }
 
-  private getHistoryFingerprint(item: HistorySnapshot) {
+  private fingerprintFromHistoryItem(item: HistorySnapshot) {
     const weight = parseInput(item.weightStr).toString();
     const price = parseInput(item.priceStr).toString();
     const total = parseInput(item.totalStr).toString();
@@ -67,13 +61,7 @@ class CalculatorStore {
     return [weight, price, total].join('|');
   }
 
-  private scheduleHistorySave() {
-    this.clearHistoryTimer();
-
-    if (!this.readyForHistory) {
-      return;
-    }
-
+  commitHistory() {
     if (!this.result) {
       return;
     }
@@ -82,42 +70,38 @@ class CalculatorStore {
       return;
     }
 
-    const currentFingerprint = this.getResultFingerprint();
+    const currentFingerprint = this.fingerprintFromResult();
 
-    this.historyTimer = window.setTimeout(() => {
-      if (!this.result) {
-        return;
-      }
+    if (this.lastCommittedFingerprint === currentFingerprint) {
+      return;
+    }
 
-      if (this.result.total.isZero()) {
-        return;
-      }
+    const history = historyService.getHistory();
+    const latest = history[0];
 
-      const history = historyService.getHistory();
-      const latest = history[0];
+    if (latest) {
+      try {
+        const latestFingerprint = this.fingerprintFromHistoryItem(latest);
 
-      if (latest) {
-        try {
-          const latestFingerprint = this.getHistoryFingerprint(latest);
-
-          if (latestFingerprint === currentFingerprint) {
-            return;
-          }
-        } catch {
-          // Ignore corrupted history entries and continue with the new valid one.
+        if (latestFingerprint === currentFingerprint) {
+          this.lastCommittedFingerprint = currentFingerprint;
+          return;
         }
+      } catch {
+        // Ignore corrupted history entries and continue with the new valid one.
       }
+    }
 
-      historyService.addItem({
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        weightStr: this.weightInput,
-        priceStr: this.priceInput,
-        totalStr: this.totalOutput,
-        timestamp: Date.now(),
-      });
+    historyService.addItem({
+      id: this.makeItemId(),
+      weightStr: this.weightInput,
+      priceStr: this.priceInput,
+      totalStr: this.totalOutput,
+      timestamp: Date.now(),
+    });
 
-      this.notify();
-    }, 700);
+    this.lastCommittedFingerprint = currentFingerprint;
+    this.notify();
   }
 
   setWeight(weight: string) {
@@ -133,8 +117,6 @@ class CalculatorStore {
   }
 
   private recalculate() {
-    this.clearHistoryTimer();
-
     this.error = null;
     this.result = null;
     this.totalOutput = '0.00';
@@ -158,7 +140,6 @@ class CalculatorStore {
       };
 
       this.totalOutput = totalDec.toFixed(2);
-      this.scheduleHistorySave();
     } catch (err: any) {
       this.error = err?.message ?? 'Naməlum xəta';
     }
