@@ -13,7 +13,7 @@ type HistorySnapshot = {
 
 class CalculatorStore {
   private listeners: Set<Listener> = new Set();
-  private lastCommittedFingerprint: string | null = null;
+  private historyTimer: ReturnType<typeof setTimeout> | null = null;
 
   public weightInput: string = storageService.get<string>('ismar_weight') || '';
   public priceInput: string = storageService.get<string>('ismar_price') || '';
@@ -24,7 +24,7 @@ class CalculatorStore {
 
   constructor() {
     if (this.weightInput || this.priceInput) {
-      this.recalculate();
+      this.recalculate(false);
     }
   }
 
@@ -35,6 +35,13 @@ class CalculatorStore {
 
   private notify() {
     this.listeners.forEach((listener) => listener());
+  }
+
+  private clearHistoryTimer() {
+    if (this.historyTimer !== null) {
+      clearTimeout(this.historyTimer);
+      this.historyTimer = null;
+    }
   }
 
   private makeItemId() {
@@ -61,7 +68,7 @@ class CalculatorStore {
     return [weight, price, total].join('|');
   }
 
-  commitHistory() {
+  private commitHistoryInternal() {
     if (!this.result) {
       return;
     }
@@ -71,11 +78,6 @@ class CalculatorStore {
     }
 
     const currentFingerprint = this.fingerprintFromResult();
-
-    if (this.lastCommittedFingerprint === currentFingerprint) {
-      return;
-    }
-
     const history = historyService.getHistory();
     const latest = history[0];
 
@@ -84,7 +86,6 @@ class CalculatorStore {
         const latestFingerprint = this.fingerprintFromHistoryItem(latest);
 
         if (latestFingerprint === currentFingerprint) {
-          this.lastCommittedFingerprint = currentFingerprint;
           return;
         }
       } catch {
@@ -99,9 +100,30 @@ class CalculatorStore {
       totalStr: this.totalOutput,
       timestamp: Date.now(),
     });
+  }
 
-    this.lastCommittedFingerprint = currentFingerprint;
+  public commitHistory() {
+    this.clearHistoryTimer();
+    this.commitHistoryInternal();
     this.notify();
+  }
+
+  private scheduleHistoryCommit() {
+    this.clearHistoryTimer();
+
+    if (!this.result) {
+      return;
+    }
+
+    if (this.result.total.isZero()) {
+      return;
+    }
+
+    this.historyTimer = setTimeout(() => {
+      this.historyTimer = null;
+      this.commitHistoryInternal();
+      this.notify();
+    }, 700);
   }
 
   setWeight(weight: string) {
@@ -116,7 +138,9 @@ class CalculatorStore {
     this.recalculate();
   }
 
-  private recalculate() {
+  private recalculate(scheduleHistory = true) {
+    this.clearHistoryTimer();
+
     this.error = null;
     this.result = null;
     this.totalOutput = '0.00';
@@ -140,6 +164,10 @@ class CalculatorStore {
       };
 
       this.totalOutput = totalDec.toFixed(2);
+
+      if (scheduleHistory) {
+        this.scheduleHistoryCommit();
+      }
     } catch (err: any) {
       this.error = err?.message ?? 'Naməlum xəta';
     }
