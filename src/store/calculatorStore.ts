@@ -13,7 +13,6 @@ type HistorySnapshot = {
 
 class CalculatorStore {
   private listeners: Set<Listener> = new Set();
-  private historyTimer: ReturnType<typeof setTimeout> | null = null;
 
   public weightInput: string = storageService.get<string>('ismar_weight') || '';
   public priceInput: string = storageService.get<string>('ismar_price') || '';
@@ -24,7 +23,7 @@ class CalculatorStore {
 
   constructor() {
     if (this.weightInput || this.priceInput) {
-      this.recalculate(false);
+      this.recalculate();
     }
   }
 
@@ -35,13 +34,6 @@ class CalculatorStore {
 
   private notify() {
     this.listeners.forEach((listener) => listener());
-  }
-
-  private clearHistoryTimer() {
-    if (this.historyTimer !== null) {
-      clearTimeout(this.historyTimer);
-      this.historyTimer = null;
-    }
   }
 
   private makeItemId() {
@@ -68,7 +60,7 @@ class CalculatorStore {
     return [weight, price, total].join('|');
   }
 
-  private commitHistoryInternal() {
+  public commitHistory() {
     if (!this.result) {
       return;
     }
@@ -78,6 +70,10 @@ class CalculatorStore {
     }
 
     const currentFingerprint = this.fingerprintFromResult();
+    if (!currentFingerprint) {
+      return;
+    }
+
     const history = historyService.getHistory();
     const latest = history[0];
 
@@ -89,7 +85,7 @@ class CalculatorStore {
           return;
         }
       } catch {
-        // Ignore corrupted history entries and continue with the new valid one.
+        // Corrupted history entry ignored. The new valid one will be stored.
       }
     }
 
@@ -100,30 +96,8 @@ class CalculatorStore {
       totalStr: this.totalOutput,
       timestamp: Date.now(),
     });
-  }
 
-  public commitHistory() {
-    this.clearHistoryTimer();
-    this.commitHistoryInternal();
     this.notify();
-  }
-
-  private scheduleHistoryCommit() {
-    this.clearHistoryTimer();
-
-    if (!this.result) {
-      return;
-    }
-
-    if (this.result.total.isZero()) {
-      return;
-    }
-
-this.historyTimer = setTimeout(() => {
-  this.historyTimer = null;
-  this.commitHistoryInternal();
-  this.notify();
-}, 1300);
   }
 
   setWeight(weight: string) {
@@ -138,9 +112,7 @@ this.historyTimer = setTimeout(() => {
     this.recalculate();
   }
 
-  private recalculate(scheduleHistory = true) {
-    this.clearHistoryTimer();
-
+  private recalculate() {
     this.error = null;
     this.result = null;
     this.totalOutput = '0.00';
@@ -164,10 +136,6 @@ this.historyTimer = setTimeout(() => {
       };
 
       this.totalOutput = totalDec.toFixed(2);
-
-      if (scheduleHistory) {
-        this.scheduleHistoryCommit();
-      }
     } catch (err: any) {
       this.error = err?.message ?? 'Naməlum xəta';
     }

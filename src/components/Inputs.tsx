@@ -4,8 +4,21 @@ import { useCalculatorStore } from '../hooks/useCalculatorStore';
 export const Inputs: React.FC = () => {
   const store = useCalculatorStore();
 
+  const handleBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = e.relatedTarget as Node | null;
+
+    if (nextTarget && e.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    store.commitHistory();
+  };
+
   return (
-    <div className="mx-4 mt-6 flex flex-col space-y-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <div
+      className="mx-4 mt-6 flex flex-col space-y-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+      onBlur={handleBlur}
+    >
       <div>
         <label htmlFor="price-input" className="mb-1.5 block text-sm font-semibold text-gray-700">
           1 Qramın Qiyməti (AZN)
