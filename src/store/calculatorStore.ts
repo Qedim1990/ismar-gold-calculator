@@ -5,12 +5,20 @@ import { CalculationResult } from '../types/calculator';
 
 type Listener = () => void;
 
+type HistorySnapshot = {
+  weightStr: string;
+  priceStr: string;
+  totalStr: string;
+};
+
 class CalculatorStore {
+  private historyTimer?: number;
+  private readyForHistory = false;
   private listeners: Set<Listener> = new Set();
-  
+
   public weightInput: string = storageService.get<string>('ismar_weight') || '';
   public priceInput: string = storageService.get<string>('ismar_price') || '';
-  
+
   public result: CalculationResult | null = null;
   public totalOutput: string = '0.00';
   public error: string | null = null;
@@ -19,6 +27,8 @@ class CalculatorStore {
     if (this.weightInput || this.priceInput) {
       this.recalculate();
     }
+
+    this.readyForHistory = true;
   }
 
   subscribe(listener: Listener) {
@@ -27,7 +37,87 @@ class CalculatorStore {
   }
 
   private notify() {
-    this.listeners.forEach(l => l());
+    this.listeners.forEach((listener) => listener());
+  }
+
+  private clearHistoryTimer() {
+    if (this.historyTimer !== undefined) {
+      clearTimeout(this.historyTimer);
+      this.historyTimer = undefined;
+    }
+  }
+
+  private getResultFingerprint() {
+    if (!this.result) {
+      return '';
+    }
+
+    return [
+      this.result.weight.toString(),
+      this.result.pricePerGram.toString(),
+      this.result.total.toString(),
+    ].join('|');
+  }
+
+  private getHistoryFingerprint(item: HistorySnapshot) {
+    const weight = parseInput(item.weightStr).toString();
+    const price = parseInput(item.priceStr).toString();
+    const total = parseInput(item.totalStr).toString();
+
+    return [weight, price, total].join('|');
+  }
+
+  private scheduleHistorySave() {
+    this.clearHistoryTimer();
+
+    if (!this.readyForHistory) {
+      return;
+    }
+
+    if (!this.result) {
+      return;
+    }
+
+    if (this.result.total.isZero()) {
+      return;
+    }
+
+    const currentFingerprint = this.getResultFingerprint();
+
+    this.historyTimer = window.setTimeout(() => {
+      if (!this.result) {
+        return;
+      }
+
+      if (this.result.total.isZero()) {
+        return;
+      }
+
+      const history = historyService.getHistory();
+      const latest = history[0];
+
+      if (latest) {
+        try {
+          const latestFingerprint = this.getHistoryFingerprint(latest);
+
+          if (latestFingerprint === currentFingerprint) {
+            return;
+          }
+        } catch {
+          // Ignore corrupted history entries and continue with the new valid one.
+        }
+      }
+
+      historyService.addItem({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        weightStr: this.weightInput,
+        priceStr: this.priceInput,
+        totalStr: this.totalOutput,
+        timestamp: Date.now(),
+      });
+
+      this.notify();
+    }, 700);
   }
 
   setWeight(weight: string) {
@@ -43,6 +133,8 @@ class CalculatorStore {
   }
 
   private recalculate() {
+    this.clearHistoryTimer();
+
     this.error = null;
     this.result = null;
     this.totalOutput = '0.00';
@@ -57,45 +149,18 @@ class CalculatorStore {
       const pDec = parseInput(this.priceInput);
 
       const totalDec = wDec.mul(pDec);
-      
+
       this.result = {
         weight: wDec,
         pricePerGram: pDec,
         total: totalDec,
-        date: new Date().toISOString()
+        date: new Date().toISOString(),
       };
 
       this.totalOutput = totalDec.toFixed(2);
-
-      const history = historyService.getHistory();
-      const lastItem = history[0];
-      let isDuplicate = false;
-
-      if (lastItem) {
-        try {
-          const lastW = parseInput(lastItem.weightStr);
-          const lastP = parseInput(lastItem.priceStr);
-          const lastT = parseInput(lastItem.totalStr);
-
-          if (lastW.equals(wDec) && lastP.equals(pDec) && lastT.equals(totalDec)) {
-            isDuplicate = true;
-          }
-        } catch {
-          // If history fails to parse, it's not a logical duplicate
-        }
-      }
-
-      if (!isDuplicate) {
-        historyService.addItem({
-          id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
-          weightStr: this.weightInput,
-          priceStr: this.priceInput,
-          totalStr: this.totalOutput,
-          timestamp: Date.now()
-        });
-      }
+      this.scheduleHistorySave();
     } catch (err: any) {
-      this.error = err.message;
+      this.error = err?.message ?? 'Naməlum xəta';
     }
 
     this.notify();
