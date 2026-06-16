@@ -18,7 +18,6 @@ export const Inputs: React.FC = () => {
           placeholder="Məsələn: 175"
           value={store.priceInput}
           onChange={(e) => store.setPrice(e.target.value)}
-          onBlur={() => store.commitHistory()}
           autoComplete="off"
         />
       </div>
@@ -35,7 +34,6 @@ export const Inputs: React.FC = () => {
           placeholder="Məsələn: 2.5"
           value={store.weightInput}
           onChange={(e) => store.setWeight(e.target.value)}
-          onBlur={() => store.commitHistory()}
           autoComplete="off"
         />
       </div>

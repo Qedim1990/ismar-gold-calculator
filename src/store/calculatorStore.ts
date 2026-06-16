@@ -119,11 +119,11 @@ class CalculatorStore {
       return;
     }
 
-    this.historyTimer = setTimeout(() => {
-      this.historyTimer = null;
-      this.commitHistoryInternal();
-      this.notify();
-    }, 700);
+this.historyTimer = setTimeout(() => {
+  this.historyTimer = null;
+  this.commitHistoryInternal();
+  this.notify();
+}, 1300);
   }
 
   setWeight(weight: string) {
